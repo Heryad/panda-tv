@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
 import { Channel } from '../utils/m3uParser';
 import Hls from 'hls.js';
@@ -11,6 +11,8 @@ interface ChannelsProps {
   searchQuery?: string;
 }
 
+const CHANNELS_PER_PAGE = 50; // Load 50 channels at a time
+
 const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQuery = '' }) => {
   const { t, dir } = useLanguage();
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
@@ -18,9 +20,14 @@ const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQ
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [displayedChannels, setDisplayedChannels] = useState<Channel[]>([]);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   // Filter by category
   let filteredChannels = selectedCategory === 'All' 
@@ -35,6 +42,52 @@ const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQ
       channel.group.toLowerCase().includes(query)
     );
   }
+
+  // Reset pagination when category or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+    setDisplayedChannels(filteredChannels.slice(0, CHANNELS_PER_PAGE));
+  }, [selectedCategory, searchQuery]);
+
+  // Load more channels when scrolling to bottom
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore) {
+          loadMoreChannels();
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    if (loadMoreRef.current) {
+      observer.observe(loadMoreRef.current);
+    }
+
+    return () => {
+      if (loadMoreRef.current) {
+        observer.unobserve(loadMoreRef.current);
+      }
+    };
+  }, [currentPage, filteredChannels, isLoadingMore]);
+
+  const loadMoreChannels = useCallback(() => {
+    const totalPages = Math.ceil(filteredChannels.length / CHANNELS_PER_PAGE);
+    
+    if (currentPage < totalPages) {
+      setIsLoadingMore(true);
+      
+      // Simulate network delay for smooth UX
+      setTimeout(() => {
+        const nextPage = currentPage + 1;
+        const startIndex = 0;
+        const endIndex = nextPage * CHANNELS_PER_PAGE;
+        setDisplayedChannels(filteredChannels.slice(startIndex, endIndex));
+        setCurrentPage(nextPage);
+        setIsLoadingMore(false);
+      }, 300);
+    }
+  }, [currentPage, filteredChannels]);
 
   const handleChannelClick = (channel: Channel) => {
     setSelectedChannel(channel);
@@ -160,6 +213,10 @@ const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQ
     };
   }, [selectedChannel]);
 
+  const totalChannels = filteredChannels.length;
+  const showingChannels = displayedChannels.length;
+  const hasMore = showingChannels < totalChannels;
+
   return (
     <div className="h-full flex flex-col bg-gradient-to-br from-[#010e1e] via-gray-900 to-[#010e1e]">
       {/* Player Section */}
@@ -262,8 +319,13 @@ const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQ
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-bold text-white" dir={dir}>
-            {t('channels.title')} ({filteredChannels.length})
+            {t('channels.title')} ({showingChannels} / {totalChannels})
           </h2>
+          {hasMore && (
+            <span className="text-sm text-gray-400">
+              Scroll for more...
+            </span>
+          )}
         </div>
 
         {filteredChannels.length === 0 ? (
@@ -274,47 +336,68 @@ const Channels: React.FC<ChannelsProps> = ({ channels, selectedCategory, searchQ
             <p>{t('channels.noChannels')}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredChannels.map((channel, index) => (
-              <div
-                key={`${channel.id}-${index}`}
-                onClick={() => handleChannelClick(channel)}
-                className={`
-                  group cursor-pointer transform transition-all duration-300 hover:scale-105
-                  ${playingChannelId === channel.id ? 'ring-2 ring-[#f2151c] ring-offset-2 ring-offset-[#010e1e]' : ''}
-                `}
-              >
-                <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl overflow-hidden hover:bg-gray-700/50 border border-gray-700">
-                  <div className="aspect-square relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900">
-                    <img
-                      src={channel.logo}
-                      alt={channel.name}
-                      className="w-full h-full object-contain p-4"
-                      loading="lazy"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/app_logo.png';
-                      }}
-                    />
-                    {playingChannelId === channel.id && (
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#f2151c]/80 to-transparent flex items-center justify-center">
-                        <div className="bg-white/20 backdrop-blur-md rounded-full p-3 animate-pulse">
-                          <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
-                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
-                          </svg>
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {displayedChannels.map((channel, index) => (
+                <div
+                  key={`${channel.id}-${index}`}
+                  onClick={() => handleChannelClick(channel)}
+                  className={`
+                    group cursor-pointer transform transition-all duration-300 hover:scale-105
+                    ${playingChannelId === channel.id ? 'ring-2 ring-[#f2151c] ring-offset-2 ring-offset-[#010e1e]' : ''}
+                  `}
+                >
+                  <div className="bg-gray-800/50 backdrop-blur-sm rounded-xl overflow-hidden hover:bg-gray-700/50 border border-gray-700">
+                    <div className="aspect-square relative overflow-hidden bg-gradient-to-br from-gray-800 to-gray-900">
+                      <img
+                        src={channel.logo}
+                        alt={channel.name}
+                        className="w-full h-full object-contain p-4"
+                        loading="lazy"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = '/app_logo.png';
+                        }}
+                      />
+                      {playingChannelId === channel.id && (
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#f2151c]/80 to-transparent flex items-center justify-center">
+                          <div className="bg-white/20 backdrop-blur-md rounded-full p-3 animate-pulse">
+                            <svg className="w-8 h-8 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+                            </svg>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <h3 className="text-white font-medium text-sm truncate" dir={dir}>
-                      {channel.name}
-                    </h3>
-                    <p className="text-gray-400 text-xs mt-1 truncate">{channel.group}</p>
+                      )}
+                    </div>
+                    <div className="p-3">
+                      <h3 className="text-white font-medium text-sm truncate" dir={dir}>
+                        {channel.name}
+                      </h3>
+                      <p className="text-gray-400 text-xs mt-1 truncate">{channel.group}</p>
+                    </div>
                   </div>
                 </div>
+              ))}
+            </div>
+
+            {/* Load More Trigger */}
+            {hasMore && (
+              <div ref={loadMoreRef} className="py-8 flex justify-center">
+                {isLoadingMore ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 border-3 border-[#f2151c] border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-gray-400">Loading more channels...</span>
+                  </div>
+                ) : (
+                  <button
+                    onClick={loadMoreChannels}
+                    className="px-6 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                  >
+                    Load More Channels
+                  </button>
+                )}
               </div>
-            ))}
-          </div>
+            )}
+          </>
         )}
       </div>
     </div>
