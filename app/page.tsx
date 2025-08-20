@@ -1,103 +1,157 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useLanguage } from './contexts/LanguageContext';
+import Header from './components/Header';
+import Categories from './components/Categories';
+import Channels from './components/Channels';
+import { parseM3U, getCategories, Channel } from './utils/m3uParser';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const { dir } = useLanguage();
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [loading, setLoading] = useState(true);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  useEffect(() => {
+    // Splash screen progress animation
+    const progressInterval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(progressInterval);
+          return 100;
+        }
+        return prev + 2;
+      });
+    }, 60); // 3000ms / 50 steps = 60ms per step
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+    // Hide splash screen after 3 seconds
+    const splashTimeout = setTimeout(() => {
+      setShowSplash(false);
+    }, 3000);
+
+    return () => {
+      clearInterval(progressInterval);
+      clearTimeout(splashTimeout);
+    };
+  }, []);
+
+  useEffect(() => {
+    const loadChannels = async () => {
+      try {
+        const response = await fetch('/channels.m3u');
+        const text = await response.text();
+        const parsedChannels = parseM3U(text);
+        const parsedCategories = getCategories(parsedChannels);
+        
+        setChannels(parsedChannels);
+        setCategories(parsedCategories);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error loading channels:', error);
+        setLoading(false);
+      }
+    };
+
+    // Only load channels after splash screen
+    if (!showSplash) {
+      loadChannels();
+    }
+  }, [showSplash]);
+
+  // Splash Screen
+  if (showSplash) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-[#010e1e]">
+        <div className="flex flex-col items-center">
+          {/* Logo */}
+          <img 
+            src="/app_logo.png" 
+            alt="Panda TV" 
+            className="w-32 h-32 md:w-48 md:h-48 object-contain mb-8"
+          />
+          
+          {/* Progress Bar Container */}
+          <div className="w-64 md:w-96 h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-[#f2151c] transition-all duration-100 ease-out rounded-full"
+              style={{ width: `${progress}%` }}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          </div>
+          
+          {/* Loading Text */}
+          <p className="text-white/60 mt-4 text-sm">Loading...</p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-screen flex flex-col bg-[#f2151c]" dir={dir}>
+      {/* Header */}
+      <Header searchQuery={searchQuery} onSearchChange={setSearchQuery} />
+
+      {/* Main Content */}
+      <div className="flex-1 flex relative overflow-hidden">
+        {/* Mobile Menu Button */}
+        <button
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="lg:hidden absolute top-4 left-4 z-50 p-2 bg-[#f2151c] rounded-lg text-white shadow-lg"
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {isMobileMenuOpen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            )}
+          </svg>
+        </button>
+
+        {/* Sidebar - Categories */}
+        <aside 
+          className={`
+            ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+            lg:translate-x-0 fixed lg:relative z-40 w-64 lg:w-80 h-full
+            transition-transform duration-300 ease-in-out
+            border-r border-gray-800 shadow-2xl lg:shadow-none
+          `}
         >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
+          <Categories
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onCategorySelect={(category) => {
+              setSelectedCategory(category);
+              setIsMobileMenuOpen(false);
+            }}
           />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
+        </aside>
+
+        {/* Overlay for mobile */}
+        {isMobileMenuOpen && (
+          <div
+            className="lg:hidden fixed inset-0 bg-black/50 z-30"
+            onClick={() => setIsMobileMenuOpen(false)}
           />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        )}
+
+        {/* Main Content - Channels */}
+        <main className="flex-1 overflow-hidden">
+          {loading ? (
+            <div className="h-full flex items-center justify-center bg-[#010e1e]">
+              <div className="text-center">
+                <div className="w-16 h-16 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-400">Loading channels...</p>
+              </div>
+            </div>
+          ) : (
+            <Channels channels={channels} selectedCategory={selectedCategory} />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
